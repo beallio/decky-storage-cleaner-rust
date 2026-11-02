@@ -1,7 +1,7 @@
 {
   "name": "decky-storage-cleaner-rust",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A plugin for tidying up your Deck's storage",
   "packageManager": "pnpm@10.33.0",
   "engines": {
