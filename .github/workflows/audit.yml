@@ -41,3 +41,7 @@ jobs:
           node-version: 24
       - name: JavaScript that ships in the plugin
         run: pnpm audit --prod
+      # Build tools never ship in the plugin: report their advisories without failing the run.
+      - name: Build tools (report only)
+        continue-on-error: true
+        run: pnpm audit

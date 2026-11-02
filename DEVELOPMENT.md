@@ -27,7 +27,7 @@ pnpm watch             # rebuild dist/index.js on every change
 
 ## Dependency security
 
-- `.github/workflows/audit.yml` runs on every push and pull request, every day at 10:00 UTC, and before each release. It runs `cargo deny check advisories bans sources` (`backend-rust/deny.toml`: RustSec advisories, unmaintained and yanked crates, wildcard versions, and only crates.io plus the pinned `beallio/decky-loader` git dependency) and `pnpm audit --prod`. Licenses are not checked.
+- `.github/workflows/audit.yml` runs on every push and pull request, every day at 10:00 UTC, and before each release. It runs `cargo deny check advisories bans sources` (`backend-rust/deny.toml`: RustSec advisories, unmaintained and yanked crates, wildcard versions, and only crates.io plus the pinned `beallio/decky-loader` git dependency) and `pnpm audit --prod`, which both fail the run. A full `pnpm audit` then reports advisories in build tools (esbuild, TypeScript) without failing, because those never ship in the plugin. Licenses are not checked.
 - `scripts/quality-gates` also runs `pnpm audit --prod`, so a known vulnerability in JavaScript that ships in the plugin fails a local build.
 - `.github/dependabot.yml` opens weekly grouped update pull requests for Cargo, npm and GitHub Actions. It skips `decky-plugin`: update it by hand (below), because `main.py` must change with it.
 
