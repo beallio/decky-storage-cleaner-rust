@@ -1,19 +1,19 @@
 //! Storage Cleaner backend: measures and deletes per-app shader cache and
 //! compatibility data under `~/.steam/steam/steamapps`.
+#![forbid(unsafe_code)]
 
 use std::{
     collections::HashSet,
-    ffi::{CStr, CString, c_int},
-    fs, io, mem,
+    fs, io,
     num::NonZero,
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{MetadataExt, PermissionsExt},
-    },
+    os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
+
+use rustix::fd::OwnedFd;
+use rustix::fs::{AtFlags, CWD, FileType, Mode, OFlags, RawDir, openat, statat};
 
 use decky_plugin::{
     Plugin,
@@ -116,68 +116,47 @@ fn scan(root: &Path) -> Value {
 /// Allocated bytes under `dir` like `du`: never follows symbolic links, and
 /// counts a hard-linked file once. Unreadable folders are skipped.
 fn disk_usage(dir: &Path) -> u64 {
-    let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else {
+    let Ok(fd) = openat(CWD, dir, DIR_FLAGS, Mode::empty()) else {
         return 0;
     };
-    // SAFETY: `path` is a valid C string.
-    let fd = unsafe { libc::open(path.as_ptr(), DIR_FLAGS) };
-    if fd < 0 {
-        return 0;
-    }
     let own = fs::symlink_metadata(dir).map_or(0, |meta| meta.blocks() * 512);
     own + walk(fd, &mut HashSet::new())
 }
 
-const DIR_FLAGS: c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+const DIR_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::DIRECTORY)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
 
-/// Sums the blocks of everything inside the folder open as `fd`, which it closes.
+/// Sums the blocks of everything inside the folder open as `fd`.
 /// Stats are relative to the folder's descriptor: on musl, std's `DirEntry::metadata`
 /// resolves the full path for every file, which made scans several times slower.
+/// `RawDir` reads names into one buffer per folder instead of allocating per file.
 /// Depth-first, so at most one descriptor per folder level is open.
-fn walk(fd: c_int, seen: &mut HashSet<(libc::dev_t, libc::ino_t)>) -> u64 {
-    // SAFETY: `fd` is an open folder that we own; `fdopendir` takes it over and `closedir` closes it.
-    let dir = unsafe { libc::fdopendir(fd) };
-    if dir.is_null() {
-        // SAFETY: `fdopendir` failed, so `fd` is still ours to close.
-        unsafe { libc::close(fd) };
-        return 0;
-    }
-    // SAFETY: `dir` is a valid stream until `closedir` below.
-    let dir_fd = unsafe { libc::dirfd(dir) };
+fn walk(fd: OwnedFd, seen: &mut HashSet<(u64, u64)>) -> u64 {
+    let mut buf = Vec::with_capacity(8192);
+    let mut dir = RawDir::new(&fd, buf.spare_capacity_mut());
     let mut total = 0;
-    loop {
-        // SAFETY: `dir` is valid; the entry stays valid until the next `readdir` on `dir`.
-        let entry = unsafe { libc::readdir(dir) };
-        if entry.is_null() {
-            break;
-        }
-        // SAFETY: `d_name` is a NUL-terminated name inside the entry.
-        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+    while let Some(Ok(entry)) = dir.next() {
+        let name = entry.file_name();
         if matches!(name.to_bytes(), b"." | b"..") {
             continue;
         }
-        // SAFETY: an all-zero `stat` is a valid value for `fstatat` to overwrite.
-        let mut st: libc::stat = unsafe { mem::zeroed() };
-        // SAFETY: `dir_fd` and `name` are valid; AT_SYMLINK_NOFOLLOW stats a link itself.
-        if unsafe { libc::fstatat(dir_fd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0
-        {
+        let Ok(st) = statat(&fd, name, AtFlags::SYMLINK_NOFOLLOW) else {
             continue;
-        }
-        let is_dir = st.st_mode & libc::S_IFMT == libc::S_IFDIR;
+        };
+        let is_dir = FileType::from_raw_mode(st.st_mode) == FileType::Directory;
         if !is_dir && st.st_nlink > 1 && !seen.insert((st.st_dev, st.st_ino)) {
             continue;
         }
         total += u64::try_from(st.st_blocks).unwrap_or(0) * 512;
         if is_dir {
-            // SAFETY: as above; O_NOFOLLOW refuses a folder swapped for a link since the stat.
-            let sub = unsafe { libc::openat(dir_fd, name.as_ptr(), DIR_FLAGS) };
-            if sub >= 0 {
+            // NOFOLLOW refuses a folder that was swapped for a link since the stat.
+            if let Ok(sub) = openat(&fd, name, DIR_FLAGS, Mode::empty()) {
                 total += walk(sub, seen);
             }
         }
     }
-    // SAFETY: `dir` is valid and not used after this.
-    unsafe { libc::closedir(dir) };
     total
 }
 
