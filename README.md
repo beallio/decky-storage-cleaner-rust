@@ -7,9 +7,11 @@ Storage Cleaner (Rust) shows how much space each game's **shader cache** and **c
 
 This is a port of Matt Carlucci's [Storage Cleaner](https://github.com/mcarlucci/decky-storage-cleaner) with a fast native backend. It works with the standard [Decky Loader](https://decky.xyz/) and with the Rust edition of Decky Loader. It is a separate plugin: if you have the original Storage Cleaner, uninstall it first so that you do not have two copies in the menu.
 
-![](assets/Screenshot-1.png)
-
-![](assets/Screenshot-2.png)
+<p>
+  <img src="assets/Screenshot-1.png" alt="Shader cache section with its total size and games grouped as installed and not installed" width="32%">
+  <img src="assets/Screenshot-2.png" alt="Compatibility data section with a cloud-save warning and a non-Steam shortcut" width="32%">
+  <img src="assets/Screenshot-3.png" alt="Non-Steam shortcut with a cloud-save warning, and the Clear All and Clear Not Installed buttons" width="32%">
+</p>
 
 ## Install
 
