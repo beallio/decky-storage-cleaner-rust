@@ -9,7 +9,7 @@ import {
   showModal,
   ConfirmModal
 } from "@decky/ui";
-import React, { FC, useState, useEffect } from "react";
+import React, { FC, useState, useEffect, useRef } from "react";
 import { FaBoxOpen } from "react-icons/fa";
 import { getAppDetails } from "./utils";
 
@@ -57,8 +57,13 @@ function formatBytes(bytes: number): string {
   return `${Math.round((bytes / 1024 ** i) * 100) / 100} ${units[i]}`;
 }
 
+// The confirm dialog closes the Quick Access menu, so the panel is mounted again while a delete
+// may still run. A new panel waits for that delete before it scans, or it would list deleted folders.
+const pendingDelete: Partial<Record<Kind, Promise<unknown>>> = {};
+
 // Only entries that Steam can name are shown, so only those can be cleared.
 async function loadGames(kind: Kind): Promise<Game[]> {
+  await pendingDelete[kind]?.catch(() => undefined);
   const { entries } = await scan(kind);
   const details = await Promise.all(entries.map(({ appid }) => getAppDetails(parseInt(appid))));
   return entries.flatMap((entry, i) => {
@@ -82,6 +87,8 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
   const isCompat = kind === "compatdata";
   const [games, setGames] = useState<Game[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
 
   const refresh = () =>
     loadGames(kind)
@@ -93,21 +100,36 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
 
   useEffect(() => {
     refresh();
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   async function clear(appids: string[]) {
-    setGames(null);
+    setBusy(true);
+    const job = deleteEntries(kind, appids);
+    pendingDelete[kind] = job;
     try {
-      const { failed } = await deleteEntries(kind, appids);
-      if (failed.length > 0) {
-        toaster.toast({
-          title: `Could not clear ${failed.length} item(s)`,
-          body: failed.map(({ appid, error }) => `${appid}: ${error}`).join("\n")
-        });
+      const { deleted, failed } = await job;
+      if (failed.length === 0) {
+        // Deleting folders does not change the size of the others, so no new scan is needed.
+        setGames(list => list && list.filter(({ appid }) => !deleted.includes(appid)));
+        setSelected(ids => ids.filter(id => !deleted.includes(id)));
+        return;
       }
+      toaster.toast({
+        title: `Could not clear ${failed.length} item(s)`,
+        body: failed.map(({ appid, error }) => `${appid}: ${error}`).join("\n")
+      });
     } catch (e) {
       toaster.toast({ title: "Storage Cleaner", body: String(e) });
+    } finally {
+      setBusy(false);
     }
+    // A failed delete can leave part of a folder, so measure again; a panel that was
+    // closed meanwhile is not shown, and its replacement scans after the delete.
+    if (!mounted.current) return;
+    setGames(null);
     setSelected([]);
     await refresh();
   }
@@ -160,7 +182,7 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
   const total = games?.reduce((sum, { bytes }) => sum + bytes, 0) ?? 0;
 
   return (
-    <PanelSection title={title} spinner={games === null}>
+    <PanelSection title={title} spinner={games === null || busy}>
       <PanelSectionRow>
         <div style={{ fontSize: "12px", marginBottom: "10px" }}>{description}</div>
       </PanelSectionRow>
@@ -173,17 +195,17 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
       {group("uninstalled", "STEAM (NOT INSTALLED)")}
       {group("shortcut", "NON-STEAM")}
       <PanelSectionRow>
-        <ButtonItem layout="below" bottomSeparator="none" disabled={!games?.length} onClick={() => games && confirm(games, "ALL games")}>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={busy || !games?.length} onClick={() => games && confirm(games, "ALL games")}>
           Clear All {short}
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" bottomSeparator="none" disabled={uninstalled.length === 0} onClick={() => confirm(uninstalled)}>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={busy || uninstalled.length === 0} onClick={() => confirm(uninstalled)}>
           Clear Not Installed {short}
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" bottomSeparator="none" disabled={chosen.length === 0} onClick={() => confirm(chosen)}>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={busy || chosen.length === 0} onClick={() => confirm(chosen)}>
           Clear Selected {short}
         </ButtonItem>
       </PanelSectionRow>

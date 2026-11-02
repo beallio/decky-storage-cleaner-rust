@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 decky-plugin = { git = "https://github.com/beallio/decky-loader", rev = "dcecc3b7a9c89e0fa1c122653ed7f8a9dd59fca0" }
+libc = "0.2"
 log = "0.4"
 tokio = { version = "1", features = ["macros", "rt"] }
 

@@ -3,9 +3,16 @@
 
 use std::{
     collections::HashSet,
-    fs, io,
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    ffi::{CStr, CString, c_int},
+    fs, io, mem,
+    num::NonZero,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{MetadataExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
+    thread,
 };
 
 use decky_plugin::{
@@ -60,18 +67,43 @@ fn is_appid(name: &str) -> bool {
 /// Lists numeric app folders with their disk usage, largest first.
 /// A missing root is an empty list: Steam creates it on demand.
 fn scan(root: &Path) -> Value {
-    let mut entries: Vec<(String, u64)> = fs::read_dir(root)
+    let appids: Vec<String> = fs::read_dir(root)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| is_appid(name))
-        .map(|appid| {
-            let bytes = disk_usage(&root.join(&appid));
-            (appid, bytes)
-        })
         .collect();
+    // One worker per core; each takes the next folder, so one huge prefix does not hold up the rest.
+    let next = AtomicUsize::new(0);
+    let workers = thread::available_parallelism()
+        .map_or(1, NonZero::get)
+        .min(appids.len());
+    let mut sizes = vec![0; appids.len()];
+    thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(appid) = appids.get(i) else {
+                            break done;
+                        };
+                        done.push((i, disk_usage(&root.join(appid))));
+                    }
+                })
+            })
+            .collect();
+        for (i, bytes) in handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+        {
+            sizes[i] = bytes;
+        }
+    });
+    let mut entries: Vec<(String, u64)> = appids.into_iter().zip(sizes).collect();
     entries.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     json!({
         "entries": entries
@@ -84,25 +116,68 @@ fn scan(root: &Path) -> Value {
 /// Allocated bytes under `dir` like `du`: never follows symbolic links, and
 /// counts a hard-linked file once. Unreadable folders are skipped.
 fn disk_usage(dir: &Path) -> u64 {
-    let mut total = fs::symlink_metadata(dir).map_or(0, |meta| meta.blocks() * 512);
-    let mut seen = HashSet::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        let Ok(read) = fs::read_dir(&dir) else {
+    let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else {
+        return 0;
+    };
+    // SAFETY: `path` is a valid C string.
+    let fd = unsafe { libc::open(path.as_ptr(), DIR_FLAGS) };
+    if fd < 0 {
+        return 0;
+    }
+    let own = fs::symlink_metadata(dir).map_or(0, |meta| meta.blocks() * 512);
+    own + walk(fd, &mut HashSet::new())
+}
+
+const DIR_FLAGS: c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+
+/// Sums the blocks of everything inside the folder open as `fd`, which it closes.
+/// Stats are relative to the folder's descriptor: on musl, std's `DirEntry::metadata`
+/// resolves the full path for every file, which made scans several times slower.
+/// Depth-first, so at most one descriptor per folder level is open.
+fn walk(fd: c_int, seen: &mut HashSet<(libc::dev_t, libc::ino_t)>) -> u64 {
+    // SAFETY: `fd` is an open folder that we own; `fdopendir` takes it over and `closedir` closes it.
+    let dir = unsafe { libc::fdopendir(fd) };
+    if dir.is_null() {
+        // SAFETY: `fdopendir` failed, so `fd` is still ours to close.
+        unsafe { libc::close(fd) };
+        return 0;
+    }
+    // SAFETY: `dir` is a valid stream until `closedir` below.
+    let dir_fd = unsafe { libc::dirfd(dir) };
+    let mut total = 0;
+    loop {
+        // SAFETY: `dir` is valid; the entry stays valid until the next `readdir` on `dir`.
+        let entry = unsafe { libc::readdir(dir) };
+        if entry.is_null() {
+            break;
+        }
+        // SAFETY: `d_name` is a NUL-terminated name inside the entry.
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+        if matches!(name.to_bytes(), b"." | b"..") {
             continue;
-        };
-        for entry in read.flatten() {
-            // DirEntry::metadata does not follow symbolic links.
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.nlink() > 1 && !meta.is_dir() && !seen.insert((meta.dev(), meta.ino())) {
-                continue;
-            }
-            total += meta.blocks() * 512;
-            if meta.is_dir() {
-                pending.push(entry.path());
+        }
+        // SAFETY: an all-zero `stat` is a valid value for `fstatat` to overwrite.
+        let mut st: libc::stat = unsafe { mem::zeroed() };
+        // SAFETY: `dir_fd` and `name` are valid; AT_SYMLINK_NOFOLLOW stats a link itself.
+        if unsafe { libc::fstatat(dir_fd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0
+        {
+            continue;
+        }
+        let is_dir = st.st_mode & libc::S_IFMT == libc::S_IFDIR;
+        if !is_dir && st.st_nlink > 1 && !seen.insert((st.st_dev, st.st_ino)) {
+            continue;
+        }
+        total += u64::try_from(st.st_blocks).unwrap_or(0) * 512;
+        if is_dir {
+            // SAFETY: as above; O_NOFOLLOW refuses a folder swapped for a link since the stat.
+            let sub = unsafe { libc::openat(dir_fd, name.as_ptr(), DIR_FLAGS) };
+            if sub >= 0 {
+                total += walk(sub, seen);
             }
         }
     }
+    // SAFETY: `dir` is valid and not used after this.
+    unsafe { libc::closedir(dir) };
     total
 }
 

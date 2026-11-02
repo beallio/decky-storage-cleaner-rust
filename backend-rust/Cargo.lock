@@ -155,6 +155,7 @@ name = "storage-cleaner-backend"
 version = "0.1.0"
 dependencies = [
  "decky-plugin",
+ "libc",
  "log",
  "tokio",
 ]
