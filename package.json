@@ -1,16 +1,22 @@
 {
-  "name": "decky-storage-cleaner",
+  "name": "decky-storage-cleaner-rust",
   "type": "module",
-  "version": "1.4.0",
+  "version": "0.1.0",
   "description": "A plugin for tidying up your Deck's storage",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "tsc --noEmit",
+    "build:backend": "cargo build --manifest-path backend-rust/Cargo.toml --release --locked --target x86_64-unknown-linux-musl",
+    "package": "pnpm build && pnpm build:backend && scripts/package.sh"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mcarlucci/decky-storage-cleaner.git"
+    "url": "git+https://github.com/beallio/decky-storage-cleaner-rust.git"
   },
   "keywords": [
     "decky",
@@ -25,12 +31,12 @@
     "cache",
     "disk"
   ],
-  "author": "Matt Carlucci <matt@uxdev.io>",
-  "license": "GNU",
+  "author": "beallio (original by Matt Carlucci)",
+  "license": "GPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/mcarlucci/decky-storage-cleaner/issues"
+    "url": "https://github.com/beallio/decky-storage-cleaner-rust/issues"
   },
-  "homepage": "https://github.com/mcarlucci/decky-storage-cleaner#readme",
+  "homepage": "https://github.com/beallio/decky-storage-cleaner-rust#readme",
   "devDependencies": {
     "@decky/rollup": "^1.0.1",
     "@decky/ui": "^4.8.0",

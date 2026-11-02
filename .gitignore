@@ -52,3 +52,4 @@ decky_plugin.py
 .pnpm-store/
 cli/
 out/
+/backend-rust/target/

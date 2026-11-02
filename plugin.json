@@ -1,11 +1,12 @@
 {
-  "name": "Storage Cleaner",
-  "author": "Matt Carlucci",
+  "name": "Storage Cleaner (Rust)",
+  "author": "beallio (original by Matt Carlucci)",
   "api_version": 1,
   "flags": [],
+  "backend": "bin/backend",
   "publish": {
     "tags": ["storage", "cleaner", "shader", "cache", "compatdata", "compatibility", "data", "disk", "utility", "other"],
-    "description": "Quickly visualize, select and clear shader cache and compatibility data.",
-    "image": "https://raw.githubusercontent.com/mcarlucci/decky-storage-cleaner/main/assets/Screenshot-1.png"
+    "description": "Native port of Storage Cleaner. Quickly visualize, select and clear shader cache and compatibility data. Uninstall the original Storage Cleaner first.",
+    "image": "https://raw.githubusercontent.com/beallio/decky-storage-cleaner-rust/main/assets/Screenshot-1.png"
   }
 }

@@ -1,4 +1,4 @@
-import { call } from "@decky/api";
+import { callable, toaster } from "@decky/api";
 import {
   ButtonItem,
   definePlugin,
@@ -13,260 +13,191 @@ import React, { FC, useState, useEffect } from "react";
 import { FaBoxOpen } from "react-icons/fa";
 import { getAppDetails } from "./utils";
 
-interface Game {
+type Kind = "shadercache" | "compatdata";
+
+interface Entry {
   appid: string;
-  size: number;
-  size_readable: string;
-  is_steam_game?: boolean;
-  is_not_steam_cloud_supported?: boolean;
-  name?: string;
+  bytes: number;
 }
 
-const Content: FC = () => {
-  const [gamesWithShaderCache, setGamesWithShaderCache] = useState<Game[]>([]);
-  const [gamesWithCompatData, setGamesWithCompatData] = useState<Game[]>([]);
-  const [totalShaderCacheSize, setTotalShaderCacheSize] = useState<string>("");
-  const [totalCompatDataSize, setTotalCompatDataSize] = useState<string>("");
-  const [selectedGamesWithShaderCache, setSelectedGamesWithShaderCache] = useState<string[]>([]);
-  const [selectedGamesWithCompatData, setSelectedGamesWithCompatData] = useState<string[]>([]);
+// Steam game (installed or not) or non-Steam shortcut.
+type Group = "installed" | "uninstalled" | "shortcut";
 
-  // Initialize data
+interface Game extends Entry {
+  name: string;
+  group: Group;
+  is_not_steam_cloud_supported: boolean;
+}
+
+interface DeleteResult {
+  deleted: string[];
+  failed: { appid: string; error: string }[];
+}
+
+const scan = callable<[kind: Kind], { entries: Entry[] }>("scan");
+const deleteEntries = callable<[kind: Kind, appids: string[]], DeleteResult>("delete");
+
+const SECTIONS: Record<Kind, { title: string; short: string; description: string }> = {
+  shadercache: {
+    title: "Shader Cache",
+    short: "Shader Cache",
+    description: "Shader cache is a precompiled collection of shader programs that helps reduce lag in graphics-intensive applications. It's ok to delete because it will be recreated the next time you run the application."
+  },
+  compatdata: {
+    title: "Compatibility Data",
+    short: "Compat Data",
+    description: "Compatibility data is information stored by your Steam Deck to ensure compatibility with hardware and other software. It's ok to delete because it will be recreated automatically as needed."
+  }
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${Math.round((bytes / 1024 ** i) * 100) / 100} ${units[i]}`;
+}
+
+// Only entries that Steam can name are shown, so only those can be cleared.
+async function loadGames(kind: Kind): Promise<Game[]> {
+  const { entries } = await scan(kind);
+  const details = await Promise.all(entries.map(({ appid }) => getAppDetails(parseInt(appid))));
+  return entries.flatMap((entry, i) => {
+    const info = details[i];
+    if (!info?.strDisplayName || !entry.bytes) return [];
+    // iInstallFolder is -1 both for shortcuts and for Steam games that are not installed.
+    const group: Group = window.appStore.GetAppOverviewByAppID(parseInt(entry.appid))?.BIsShortcut()
+      ? "shortcut"
+      : info.iInstallFolder === -1 ? "uninstalled" : "installed";
+    return [{
+      ...entry,
+      name: info.strDisplayName,
+      group,
+      is_not_steam_cloud_supported: info.eCloudStatus === 1
+    }];
+  });
+}
+
+const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
+  const { title, short, description } = SECTIONS[kind];
+  const isCompat = kind === "compatdata";
+  const [games, setGames] = useState<Game[] | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const refresh = () =>
+    loadGames(kind)
+      .then(setGames)
+      .catch(e => {
+        console.error(e);
+        setGames([]);
+      });
+
   useEffect(() => {
-    const getGamesWithShaderCache = async () => await call<[string], any>("list_games_with_temp_data", "shadercache");
-    getGamesWithShaderCache()
-      .then(async res => setGamesWithShaderCache(await enrichGameList(JSON.parse(`${res as Game[]}`))))
-      .catch(e => console.log(e.message))
+    refresh();
+  }, []);
 
-    const getGamesWithCompatData = async () => await call<[string], any>("list_games_with_temp_data", "compatdata");
-    getGamesWithCompatData()
-      .then(async res => setGamesWithCompatData(await enrichGameList(JSON.parse(`${res as Game[]}`))))
-      .catch(e => console.log(e.message))
-
-    const getTotalShaderCacheSize = async () => await call<[string, boolean], any>("get_size", "shadercache", true);
-    getTotalShaderCacheSize()
-      .then(res => setTotalShaderCacheSize(res as string))
-      .catch(e => console.log(e.message))
-    
-    const getTotalCompatDataSize = async () => await call<[string, boolean], any>("get_size", "compatdata", true);
-    getTotalCompatDataSize()
-      .then(res => setTotalCompatDataSize(res as string))
-      .catch(e => console.log(e.message))
-  }, [])
-
-  // Methods
-  function handleCheckboxSelection(checked: boolean, appid: string, cacheType: string) {
-    if (cacheType.toLowerCase() === "shader") {
-      let updatedList = [...selectedGamesWithShaderCache];
-      if (checked) {
-        updatedList = [...selectedGamesWithShaderCache, appid];
-      } else {
-        updatedList.splice(selectedGamesWithShaderCache.indexOf(appid), 1)
+  async function clear(appids: string[]) {
+    setGames(null);
+    try {
+      const { failed } = await deleteEntries(kind, appids);
+      if (failed.length > 0) {
+        toaster.toast({
+          title: `Could not clear ${failed.length} item(s)`,
+          body: failed.map(({ appid, error }) => `${appid}: ${error}`).join("\n")
+        });
       }
-      setSelectedGamesWithShaderCache(updatedList);
+    } catch (e) {
+      toaster.toast({ title: "Storage Cleaner", body: String(e) });
     }
-
-    if (cacheType.toLowerCase() === "compat") {
-      let updatedList = [...selectedGamesWithCompatData];
-      if (checked) {
-        updatedList = [...selectedGamesWithCompatData, appid];
-      } else {
-        updatedList.splice(selectedGamesWithCompatData.indexOf(appid), 1)
-      }
-      setSelectedGamesWithCompatData(updatedList);
-    }
+    setSelected([]);
+    await refresh();
   }
 
-  async function enrichGameList(gamesArr: Game[]): Promise<Game[]> {
-    if (!gamesArr || gamesArr.length === 0) return [];
-    const gameDetailsArr = await Promise.all(gamesArr.map(game => getAppDetails(parseInt(game.appid))));
-
-    return gamesArr
-      .map((game) => {
-        const gameInfo = gameDetailsArr.find(gameDetails => gameDetails?.unAppID === parseInt(game.appid));
-        game.name = gameInfo?.strDisplayName;
-        game.is_steam_game = gameInfo?.iInstallFolder !== -1;
-        game.is_not_steam_cloud_supported = gameInfo?.eCloudStatus === 1
-        return game;
-      })
-      .filter(({ name, size }) => name && size)
-  }
-  
-  async function clearDataCache(cacheDirName: string, appidArr?: string[]): Promise<void> {
-    if (appidArr && appidArr.length > 0) {
-      appidArr.forEach(async appid => await call<[string], any>("delete_cache", `${cacheDirName}/${appid}`));
-    } else {
-      await call<[string], any>("delete_cache", cacheDirName);
-    }
+  // Without a label, the dialog names every game in the list.
+  function confirm(list: Game[], label?: string) {
+    const unsafe = isCompat ? list.filter(({ is_not_steam_cloud_supported }) => is_not_steam_cloud_supported) : [];
+    showModal(
+      <ConfirmModal strTitle={`Clear ${title}`} strOKButtonText="Clear" onOK={() => clear(list.map(({ appid }) => appid))}>
+        {unsafe.length > 0 && (
+          <div style={{ color: "red", marginBottom: "10px" }}>
+            <strong>DANGER: On-device game save data may be permanently lost for {unsafe.map(({ name }) => name).join(", ")}!</strong>
+          </div>
+        )}
+        <div>
+          Are you sure you want to clear the {title.toLowerCase()} for{" "}
+          <strong>{label ?? list.map(({ name }) => name).join(", ")}</strong>?
+        </div>
+      </ConfirmModal>
+    );
   }
 
-  // Templates
-  const renderCheckbox = (game: Game, cacheType: string) => {
+  const group = (which: Group, label: string) => {
+    const list = games?.filter(game => game.group === which) ?? [];
+    if (list.length === 0) return null;
     return (
-      <React.Fragment>
-        <DialogCheckbox key={game.appid} label={`${game.name} (${game.size_readable})`} onChange={checked => handleCheckboxSelection(checked, game.appid.toString(), cacheType)}/>
-        {cacheType === "compat" && game.is_not_steam_cloud_supported && <div style={{ fontSize: "12px", color: "red", margin: "0 0 12px 35px" }}>WARNING: This game DOES NOT support or has never synced to Steam Cloud Saves. ON-DEVICE GAME SAVE DATA MAY BE PERMANANTLEY LOST!</div>}
-      </React.Fragment>
+      <>
+        <PanelSectionRow>
+          <div style={{ fontSize: "15px", fontWeight: "bold", marginBottom: "10px" }}>{label}</div>
+        </PanelSectionRow>
+        {list.map(game => (
+          <React.Fragment key={game.appid}>
+            <DialogCheckbox
+              label={`${game.name} (${formatBytes(game.bytes)})`}
+              onChange={checked => setSelected(ids => (checked ? [...ids, game.appid] : ids.filter(id => id !== game.appid)))}
+            />
+            {isCompat && game.is_not_steam_cloud_supported && (
+              <div style={{ fontSize: "12px", color: "red", margin: "0 0 12px 35px" }}>
+                WARNING: This game DOES NOT support or has never synced to Steam Cloud Saves. ON-DEVICE GAME SAVE DATA MAY BE PERMANENTLY LOST!
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </>
     );
   };
 
-  const renderGameLists = (gamesArr: Game[], cacheType: string) => (
-    <React.Fragment>
-      <PanelSectionRow>
-        <div style={{ fontSize: "15px", fontWeight: "bold", marginBottom: "10px", display: gamesArr.some(({ is_steam_game }) => is_steam_game) ? "block" : "none" }}>
-          STEAM
-        </div>
-      </PanelSectionRow>
-      {gamesArr?.length > 0 && gamesArr.map(game => {
-        if (!game.is_steam_game) return;
-        return renderCheckbox(game, cacheType)
-      })}
-      <PanelSectionRow>
-        <div style={{ fontSize: "15px", fontWeight: "bold", marginBottom: "10px", display: gamesArr.some(({ is_steam_game }) => !is_steam_game) ? "block" : "none" }}>
-          NON-STEAM
-        </div>
-      </PanelSectionRow>
-      {gamesArr?.length > 0 && gamesArr.map(game => {
-        if (game.is_steam_game) return;
-        return renderCheckbox(game, cacheType)
-      })}
-    </React.Fragment>
-  );
-  
-  // Render
+  const chosen = games?.filter(({ appid }) => selected.includes(appid)) ?? [];
+  const uninstalled = games?.filter(game => game.group === "uninstalled") ?? [];
+  const total = games?.reduce((sum, { bytes }) => sum + bytes, 0) ?? 0;
+
   return (
-    <div id="decky-storage-cleaner">
-      <PanelSection title="Shader Cache" spinner={gamesWithShaderCache?.length === 0 && totalShaderCacheSize !== "0B"}>
-        <PanelSectionRow>
-          <div style={{ fontSize: "12px", marginBottom: "10px" }}>
-            Shader cache is a precompiled collection of shader programs that helps reduce lag in graphics-intensive applications. It's ok to delete because it will be recreated the next time you run the application.
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ fontSize: "17px", marginBottom: "10px" }}>
-            Total Size: {totalShaderCacheSize?.length > 0 ? totalShaderCacheSize : "Calculating..."}
-          </div>
-        </PanelSectionRow>
-        { renderGameLists(gamesWithShaderCache, "shader") }
-        <React.Fragment>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              bottomSeparator="none"
-              disabled={totalShaderCacheSize === "0B"}
-              onClick={() => 
-                showModal(
-                  <ConfirmModal
-                    onCancel={() => {}} 
-                    onOK={async () => await clearDataCache("shadercache")}
-                    strTitle={"Clear Shader Cache"}
-                    strOKButtonText={"Clear"}
-                  >
-                    Are you sure you want to clear <strong>ALL</strong> shader cache?
-                  </ConfirmModal>
-                )
-              }
-            >
-              Clear All Shader Cache
-            </ButtonItem>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              bottomSeparator="none"
-              disabled={selectedGamesWithShaderCache.length === 0}
-              onClick={() => 
-                showModal(
-                  <ConfirmModal
-                    onCancel={() => {}} 
-                    onOK={async () => await clearDataCache("shadercache", selectedGamesWithShaderCache)}
-                    strTitle={"Clear Shader Cache"}
-                    strOKButtonText={"Clear"}
-                  >
-                    Are you sure you want to clear the shader cache for <strong>{Array.from(gamesWithShaderCache.filter(({ appid }) => selectedGamesWithShaderCache.includes(appid.toString())).map(({ name }) => ` ${name}`)).toString()}</strong>?
-                  </ConfirmModal>
-                )
-              }
-            >
-              Clear Selected Shader Cache
-            </ButtonItem>
-          </PanelSectionRow>
-        </React.Fragment>
-      </PanelSection>
-      <PanelSection title="Compatibility Data" spinner={gamesWithCompatData?.length === 0 && totalCompatDataSize !== "0B"}>
-        <PanelSectionRow>
-          <div style={{ fontSize: "12px", marginBottom: "10px" }}>
-            Compatibility data is information stored by your Steam Deck to ensure compatibility with hardware and other software. It's ok to delete because it will be recreated automatically as needed.
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ fontSize: "17px", marginBottom: "10px" }}>
-            Total Size: {totalCompatDataSize?.length > 0 ? totalCompatDataSize : "Calculating..."}
-          </div>
-        </PanelSectionRow>
-        { renderGameLists(gamesWithCompatData, "compat") }
-        <React.Fragment>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              bottomSeparator="none"
-              disabled={totalCompatDataSize === "0B"}
-              onClick={() => 
-                showModal(
-                  <ConfirmModal
-                    onCancel={() => {}} 
-                    onOK={async () => await clearDataCache("compatdata")}
-                    strTitle={"Clear Compatibility Data"}
-                    strOKButtonText={"Clear"}
-                  >
-                    {gamesWithCompatData.filter(({ is_not_steam_cloud_supported }) => is_not_steam_cloud_supported).length > 0 && (
-                      <div style={{ color: "red", marginBottom: "10px" }}>
-                        <strong>DANGER: On-device game save data may be permanently lost for {Array.from(gamesWithCompatData.filter(({ appid, is_not_steam_cloud_supported }) => appid.toString() && is_not_steam_cloud_supported).map(({ name }) => ` ${name}`)).toString()}!</strong>
-                      </div>
-                    )}
-                    <div>Are you sure you want to clear <strong>ALL</strong> compatibility data?</div>
-                  </ConfirmModal>
-                )
-              }
-            >
-              Clear All Compat Data
-            </ButtonItem>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              bottomSeparator="none"
-              disabled={selectedGamesWithCompatData.length === 0}
-              onClick={() => 
-                showModal(
-                  <ConfirmModal
-                    onCancel={() => {}} 
-                    onOK={async () => await clearDataCache("compatdata", selectedGamesWithCompatData)}
-                    strTitle={"Clear Compatibility Data"}
-                    strOKButtonText={"Clear"}
-                  >
-                    {gamesWithCompatData.filter(({ appid, is_not_steam_cloud_supported }) => selectedGamesWithCompatData.includes(appid.toString()) && is_not_steam_cloud_supported).length > 0 && (
-                      <div style={{ color: "red", marginBottom: "10px" }}>
-                        <strong>DANGER: On-device game save data may be permanently lost for {Array.from(gamesWithCompatData.filter(({ appid, is_not_steam_cloud_supported }) => selectedGamesWithCompatData.includes(appid.toString()) && is_not_steam_cloud_supported).map(({ name }) => ` ${name}`)).toString()}!</strong>
-                      </div>
-                    )}
-                    <div>Are you sure you want to clear the compatibility data for <strong>{Array.from(gamesWithCompatData.filter(({ appid }) => selectedGamesWithCompatData.includes(appid.toString())).map(({ name }) => ` ${name}`)).toString()}</strong>?</div>
-                  </ConfirmModal>
-                )
-              }
-            >
-              Clear Selected Compat Data
-            </ButtonItem>
-          </PanelSectionRow>
-        </React.Fragment>
-      </PanelSection>
-    </div>
+    <PanelSection title={title} spinner={games === null}>
+      <PanelSectionRow>
+        <div style={{ fontSize: "12px", marginBottom: "10px" }}>{description}</div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <div style={{ fontSize: "17px", marginBottom: "10px" }}>
+          Total Size: {games ? formatBytes(total) : "Calculating..."}
+        </div>
+      </PanelSectionRow>
+      {group("installed", "STEAM")}
+      {group("uninstalled", "STEAM (NOT INSTALLED)")}
+      {group("shortcut", "NON-STEAM")}
+      <PanelSectionRow>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={!games?.length} onClick={() => games && confirm(games, "ALL games")}>
+          Clear All {short}
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={uninstalled.length === 0} onClick={() => confirm(uninstalled)}>
+          Clear Not Installed {short}
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" bottomSeparator="none" disabled={chosen.length === 0} onClick={() => confirm(chosen)}>
+          Clear Selected {short}
+        </ButtonItem>
+      </PanelSectionRow>
+    </PanelSection>
   );
 };
 
-export default definePlugin(() => {
-  return {
-    title: <div className={staticClasses.Title}>Storage Cleaner</div>,
-    content: <Content />,
-    icon: <FaBoxOpen />,
-  };
-});
+export default definePlugin(() => ({
+  title: <div className={staticClasses.Title}>Storage Cleaner</div>,
+  content: (
+    <div id="decky-storage-cleaner">
+      <CacheSection kind="shadercache" />
+      <CacheSection kind="compatdata" />
+    </div>
+  ),
+  icon: <FaBoxOpen />
+}));

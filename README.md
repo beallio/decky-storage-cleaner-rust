@@ -1,59 +1,39 @@
-# Storage Cleaner (Decky Loader Plugin)
+# Storage Cleaner (Rust) (Decky Loader Plugin)
 
-A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for tidying up your Steam Deck's storage (and getting rid of that pesky 'Other' storage eating it all up)! Quickly visualize, select and clear shader cache and compatibility data.
+Storage Cleaner (Rust) shows how much space each game's **shader cache** and **compatibility data** use on your Steam Deck, and lets you clear them. This can free a lot of the "Other" storage that Steam shows.
 
-## Features
+- **Shader cache** is graphics data that a game builds the first time it runs. If you delete it, Steam builds it again, so the game can stutter a little the next time you play it.
+- **Compatibility data** is the Windows environment (Proton "prefix") that Steam makes for each Windows game. If you delete it, Steam makes it again. **Some games keep their save files here.** If a game does not use Steam Cloud saves, deleting its compatibility data can delete your saves. The plugin shows a red warning for these games.
 
-- Get disk usage data for your Steam Deck's shader cache and compatibility data
-- Identify Steam and Non-Steam games
-- Selectively clear the shader cache and compatibility data you don't want
-- Clear all the shader cache or compatibility data all at once
+This is a port of Matt Carlucci's [Storage Cleaner](https://github.com/mcarlucci/decky-storage-cleaner) with a fast native backend. It works with the standard [Decky Loader](https://decky.xyz/) and with the Rust edition of Decky Loader. It is a separate plugin: if you have the original Storage Cleaner, uninstall it first so that you do not have two copies in the menu.
 
 ![](assets/Screenshot-1.png)
 
 ![](assets/Screenshot-2.png)
 
-## Installation
+## Install
 
-1. If you haven't already, install [Decky Loader](https://deckbrew.xyz/) on your Steam Deck.
-2. With Decky Loader installed, press the Quick Access button on your Steam Deck.
-3. Navigate to the Plug icon (Decky) and press the Gear icon (settings).
-4. Find Storage Cleaner and press "Install".
+1. Install [Decky Loader](https://decky.xyz/) on your Steam Deck, if you do not have it yet.
+2. If the original **Storage Cleaner** is installed, uninstall it: in the Decky settings (gear icon), open **Plugins**, find Storage Cleaner, and select **Uninstall**.
+3. On the Steam Deck, open the [latest release](https://github.com/beallio/decky-storage-cleaner-rust/releases/latest) and download `decky-storage-cleaner-rust.zip`.
+4. Press the Quick Access button (`…`), open the Decky tab (plug icon), and select the gear icon.
+5. In **General**, turn on **Developer mode**. Then open **Developer** and select **Install Plugin from ZIP File**. Choose the file that you downloaded.
 
-## Support My Work
+## Use
 
-Storage Cleaner is completely free-to-use. It is built and maintained in my spare time. With your help I can remain caffeinated and awake - squashing bugs, adding features and creating more useful plugins.
+1. Press the Quick Access button, open the Decky tab, and select **Storage Cleaner (Rust)**.
+2. Each section shows the total size and a list of games, with the size of each game. Games are in three groups: **STEAM** (installed Steam games), **STEAM (NOT INSTALLED)** (data left behind by Steam games that you uninstalled), and **NON-STEAM** (shortcuts that you added to Steam).
+3. Select games and press **Clear Selected**, press **Clear Not Installed** to clear only the games in the "not installed" group, or press **Clear All** to clear every game in the list. Each action asks you to confirm before it deletes anything.
 
-<a href="https://www.buymeacoffee.com/mcarlucci" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+Only games that Steam knows by name are listed, so only those are cleared. Compatibility data of a game that is not installed can still hold your saves; check the red warnings before you clear it.
 
-## Possible Future Features
+## Troubleshooting
 
-- Support microsd storage (move/clear)...?
-- Clear depotcache...?
-- Small disk analyser/visualizer...?
-- Auto/scheduled cache cleanups...?
-- Identify games with games saves stored in compatdata...?
-- Empty Trash directory...?
+- **A game is not in the list:** Steam does not know a name for that folder (for example, an uninstalled non-Steam shortcut). The plugin does not touch these folders.
+- **"Could not clear" message:** the message shows the reason for each game, for example a folder that was not a normal folder or a file that the plugin had no permission to delete.
+- **The list stays empty or keeps loading:** restart Steam, or reinstall the plugin.
+- **Two Storage Cleaner entries in the Decky menu:** the original plugin is still installed. Uninstall the one without "(Rust)".
 
-## Methodologies
+## Credits
 
-### Getting Shader Cache and Compat Data
-
-- Native Python file methods are used to get all of the subdirectories in the `home/deck/.steam/steam/steamapps/shadercache` and `home/deck/.steam/steam/steamapps/compatdata` parent directories
-- Each subdirectory name is a steam appid/gameid
-
-### Getting Steam and Non-Steam App Names/Types
-
-- Since each game directory name is an appid/gameid, it can be used to fetch the game name via the client side Steam `appStore.GetAppOverviewByGameID(game.appid)` method. This method returns an object with a `display_name` property, which is the name of the corresponding steam or non-steam game
-
-- `appStore.GetAppOverviewByGameID(game.appid)` also returns the `app_type` property, which is used to differentiate between Steam and Non-Steam games
-
-### Clearing Shader Cache and Compat Data
-
-- Game specific shader cache is deleted recursively by appid (directory name) using the `shutil.rmtree('home/deck/.steam/steam/steamapps/shadercache/<appId>')` native Python method
-  
-  > Shader Cache will regerenerate either during gameplay or preemptively via OTA (over the air) updates via Steam
-
-### Detecting Games That Don't Support or Have Never Synced to Steam Cloud Saves
-
-- `appStore.GetAppOverviewByGameID(game.appid)` returns the `local_per_client_data.cloud_status` object/property, which is used to check if an installed game is/has ever synced to Steam Cloud Saves
+Original plugin by [Matt Carlucci](https://github.com/mcarlucci/decky-storage-cleaner). Native port by [beallio](https://github.com/beallio). Developer notes are in [DEVELOPMENT.md](DEVELOPMENT.md).

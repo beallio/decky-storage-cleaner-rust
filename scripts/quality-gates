@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# All checks that CI runs. Invoke from anywhere; it works from the repository root.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+manifest=backend-rust/Cargo.toml
+[[ -d node_modules ]] || pnpm install --frozen-lockfile
+
+cargo fmt --manifest-path "$manifest" --check
+cargo clippy --manifest-path "$manifest" --all-targets --locked -- -D warnings
+cargo test --manifest-path "$manifest" --locked
+
+# main.py must stay a byte-identical copy of the shim from the pinned decky-plugin rev.
+sdk_manifest="$(cargo metadata --manifest-path "$manifest" --format-version 1 --locked |
+  node -p 'JSON.parse(require("fs").readFileSync(0)).packages.find(p => p.name === "decky-plugin").manifest_path')"
+if ! cmp -s main.py "$(dirname "$sdk_manifest")/shim/main.py"; then
+  echo "quality-gates: main.py differs from the pinned decky-plugin shim" >&2
+  exit 1
+fi
+
+pnpm typecheck
+pnpm package
+
+echo "quality-gates: OK"
