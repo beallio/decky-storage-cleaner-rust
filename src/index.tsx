@@ -7,7 +7,8 @@ import {
   staticClasses,
   DialogCheckbox,
   showModal,
-  ConfirmModal
+  ConfirmModal,
+  Field
 } from "@decky/ui";
 import React, { FC, useState, useEffect, useRef } from "react";
 import { FaBoxOpen } from "react-icons/fa";
@@ -213,12 +214,33 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
   );
 };
 
+const versionTextStyle = { fontSize: "0.8rem" } as const;
+
+const VersionsSection: FC = () => (
+  <PanelSection title="Versions">
+    <style>{".decky-storage-cleaner-version-row { padding-top: 4px !important; padding-bottom: 4px !important; }"}</style>
+    <PanelSectionRow>
+      <Field
+        label={<span style={versionTextStyle}>Plugin</span>}
+        focusable={true}
+        highlightOnFocus={true}
+        bottomSeparator="none"
+        padding="standard"
+        className="decky-storage-cleaner-version-row"
+      >
+        <span style={versionTextStyle}>{__PLUGIN_VERSION__}</span>
+      </Field>
+    </PanelSectionRow>
+  </PanelSection>
+);
+
 export default definePlugin(() => ({
   title: <div className={staticClasses.Title}>Storage Cleaner</div>,
   content: (
     <div id="decky-storage-cleaner">
       <CacheSection kind="shadercache" />
       <CacheSection kind="compatdata" />
+      <VersionsSection />
     </div>
   ),
   icon: <FaBoxOpen />
