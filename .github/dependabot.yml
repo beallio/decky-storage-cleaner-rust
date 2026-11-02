@@ -1,0 +1,33 @@
+# Weekly grouped update PRs. The audit workflow catches advisories daily in between.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/backend-rust"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "build(deps)"
+    ignore:
+      # Pinned by git rev with a matching copy of its shim in main.py; update both together by hand.
+      - dependency-name: "decky-plugin"
+    groups:
+      cargo:
+        patterns: ["*"]
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      npm:
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]

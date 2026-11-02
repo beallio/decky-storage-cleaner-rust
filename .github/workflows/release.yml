@@ -8,8 +8,11 @@ jobs:
   build:
     uses: ./.github/workflows/ci.yml
 
+  audit:
+    uses: ./.github/workflows/audit.yml
+
   publish:
-    needs: build
+    needs: [build, audit]
     runs-on: ubuntu-latest
     permissions:
       contents: write

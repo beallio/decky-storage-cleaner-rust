@@ -4,7 +4,7 @@
 
 | Path | Purpose |
 |---|---|
-| `src/` | React frontend, bundled by Rollup into `dist/index.js` |
+| `src/` | React frontend, bundled by esbuild (`scripts/build-frontend.mjs`) into `dist/index.js`. React, react-dom and `@decky/ui` come from Steam's own copies (`window.SP_REACT`, `window.SP_REACTDOM`, `window.DFL`), and `@decky/manifest` is `plugin.json`. |
 | `backend-rust/` | Native backend (`bin/backend` in the package), built on the `decky-plugin` crate from [beallio/decky-loader](https://github.com/beallio/decky-loader) |
 | `main.py` | Byte-identical copy of `decky-plugin/shim/main.py`. The upstream Python loader imports it, and it starts `bin/backend`. The Rust loader ignores it and starts `bin/backend` itself. |
 | `scripts/package.sh` | Makes `out/decky-storage-cleaner-rust.zip` |
@@ -20,9 +20,16 @@ Node 24, pnpm 10.33 (`packageManager` in `package.json`), and rustup. `rust-tool
 
 ```sh
 pnpm install
-scripts/quality-gates   # fmt, clippy, tests, shim parity, typecheck, package
+scripts/quality-gates   # fmt, clippy, tests, shim parity, typecheck, pnpm audit --prod, package
 pnpm package            # only build out/decky-storage-cleaner-rust.zip
+pnpm watch             # rebuild dist/index.js on every change
 ```
+
+## Dependency security
+
+- `.github/workflows/audit.yml` runs on every push and pull request, every day at 10:00 UTC, and before each release. It runs `cargo deny check advisories bans sources` (`backend-rust/deny.toml`: RustSec advisories, unmaintained and yanked crates, wildcard versions, and only crates.io plus the pinned `beallio/decky-loader` git dependency) and `pnpm audit --prod`. Licenses are not checked.
+- `scripts/quality-gates` also runs `pnpm audit --prod`, so a known vulnerability in JavaScript that ships in the plugin fails a local build.
+- `.github/dependabot.yml` opens weekly grouped update pull requests for Cargo, npm and GitHub Actions. It skips `decky-plugin`: update it by hand (below), because `main.py` must change with it.
 
 ## Backend API
 

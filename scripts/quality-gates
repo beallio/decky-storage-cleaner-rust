@@ -19,6 +19,8 @@ if ! cmp -s main.py "$(dirname "$sdk_manifest")/shim/main.py"; then
 fi
 
 pnpm typecheck
+# Fails on a known vulnerability in JavaScript that ships in the plugin. CI also runs cargo-deny.
+pnpm audit --prod
 pnpm package
 
 echo "quality-gates: OK"

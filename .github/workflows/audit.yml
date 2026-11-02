@@ -1,0 +1,43 @@
+# Known vulnerabilities in dependencies. Runs daily as well, so a new advisory shows up without a code change.
+name: Dependency audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        run: rustup toolchain install # reads rust-toolchain.toml
+      # Official release binary, pinned by SHA-256 (same as decky-loader).
+      - name: Install pinned cargo-deny
+        run: |
+          set -euo pipefail
+          asset=cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          gh release download 0.20.2 --repo EmbarkStudios/cargo-deny --pattern "$asset" --dir "$RUNNER_TEMP"
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $RUNNER_TEMP/$asset" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" --strip-components=1 --wildcards '*/cargo-deny'
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Rust advisories, bans and sources
+        run: cargo deny --manifest-path backend-rust/Cargo.toml check advisories bans sources
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - name: JavaScript that ships in the plugin
+        run: pnpm audit --prod

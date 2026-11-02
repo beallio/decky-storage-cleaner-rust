@@ -11,7 +11,7 @@ name = "backend"
 path = "src/main.rs"
 
 [dependencies]
-decky-plugin = { git = "https://github.com/beallio/decky-loader", rev = "dcecc3b7a9c89e0fa1c122653ed7f8a9dd59fca0" }
+decky-plugin = { version = "0.1.0", git = "https://github.com/beallio/decky-loader", rev = "dcecc3b7a9c89e0fa1c122653ed7f8a9dd59fca0" }
 log = "0.4"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 tokio = { version = "1", features = ["macros", "rt"] }

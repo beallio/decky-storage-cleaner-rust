@@ -6,7 +6,7 @@
  */
 export async function getAppDetails(appId: number): Promise<any | null> {
   return await new Promise((resolve) => {
-    let timeoutId: NodeJS.Timeout | undefined;
+    let timeoutId: number | undefined;
     try {
       const { unregister } = SteamClient.Apps.RegisterForAppDetails(appId, (details: any) => {
         clearTimeout(timeoutId);
@@ -14,7 +14,7 @@ export async function getAppDetails(appId: number): Promise<any | null> {
         resolve(details);
       });
 
-      timeoutId = setTimeout(() => {
+      timeoutId = window.setTimeout(() => {
         unregister();
         resolve(null);
       }, 1000);
