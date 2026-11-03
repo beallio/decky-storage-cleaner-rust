@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 const manifest = readFileSync("plugin.json", "utf8");
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const globals = { react: "SP_REACT", "react-dom": "SP_REACTDOM", "@decky/ui": "DFL" };
+const watch = process.argv.includes("--watch");
 
 const options = {
   entryPoints: ["src/index.tsx"],
@@ -14,7 +15,8 @@ const options = {
   bundle: true,
   format: "esm",
   target: "es2020",
-  sourcemap: true,
+  // The package ships only index.js, so only watch builds carry a map, inline.
+  sourcemap: watch && "inline",
   define: { "process.env.NODE_ENV": '"production"', __PLUGIN_VERSION__: JSON.stringify(version) },
   logLevel: "warning",
   plugins: [
@@ -32,7 +34,7 @@ const options = {
   ]
 };
 
-if (process.argv.includes("--watch")) {
+if (watch) {
   await (await context(options)).watch();
 } else {
   await build(options);

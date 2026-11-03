@@ -6,14 +6,14 @@ use std::{
     collections::HashSet,
     fs, io,
     num::NonZero,
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
 
 use rustix::fd::OwnedFd;
-use rustix::fs::{AtFlags, CWD, FileType, Mode, OFlags, RawDir, openat, statat};
+use rustix::fs::{AtFlags, CWD, FileType, Mode, OFlags, RawDir, fstat, openat, statat};
 
 use decky_plugin::{
     Plugin,
@@ -119,7 +119,7 @@ fn disk_usage(dir: &Path) -> u64 {
     let Ok(fd) = openat(CWD, dir, DIR_FLAGS, Mode::empty()) else {
         return 0;
     };
-    let own = fs::symlink_metadata(dir).map_or(0, |meta| meta.blocks() * 512);
+    let own = fstat(&fd).map_or(0, |st| u64::try_from(st.st_blocks).unwrap_or(0) * 512);
     own + walk(fd, &mut HashSet::new())
 }
 
@@ -228,12 +228,34 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
-    fn temp_root(name: &str) -> PathBuf {
+    /// Deleted on drop, so test runs do not fill the temporary folder.
+    struct TempRoot(PathBuf);
+
+    impl std::ops::Deref for TempRoot {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for TempRoot {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp_root(name: &str) -> TempRoot {
         let root =
             std::env::temp_dir().join(format!("storage-cleaner-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        root
+        TempRoot(root)
     }
 
     fn write(path: &Path, len: usize) {
