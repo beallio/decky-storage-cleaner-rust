@@ -41,14 +41,14 @@
         },
         // DEPLOY
         {
-            "label": "createfolders",
-            "detail": "Create plugins folder in expected directory",
+            "label": "chmodfolders",
+            "detail": "Let deck write the plugins folder (sudo asks for the password in the terminal)",
             "type": "shell",
             "group": "none",
             "dependsOn": [
                 "checkforsettings"
             ],
-            "command": "ssh deck@${config:deckip} -p ${config:deckport} ${config:deckkey} 'mkdir -p ${config:deckdir}/homebrew/pluginloader && mkdir -p ${config:deckdir}/homebrew/plugins'",
+            "command": "ssh -t deck@${config:deckip} -p ${config:deckport} ${config:deckkey} 'sudo chmod -R ug+rw ${config:deckdir}/homebrew/'",
             "problemMatcher": []
         },
         {
@@ -57,7 +57,6 @@
             "type": "shell",
             "group": "none",
             "dependsOn": [
-                "createfolders",
                 "chmodfolders"
             ],
             "command": "rm -rf out/deploy && unzip -q out/decky-storage-cleaner-rust.zip -d out/deploy && rsync -azp --delete --chmod=D0755,F0755 --rsh='ssh -p ${config:deckport} ${config:deckkey}' out/deploy/decky-storage-cleaner-rust/ deck@${config:deckip}:${config:deckdir}/homebrew/plugins/decky-storage-cleaner-rust",
@@ -65,29 +64,10 @@
         },
         {
             "label": "restartloader",
-            "detail": "Restart the plugin loader (to load updated python code)",
+            "detail": "Restart Decky Loader so it loads the new build (the Rust fork runs as a user service)",
             "type": "shell",
             "group": "none",
-            "dependsOn": [],
-            "command": "ssh deck@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S systemctl restart plugin_loader'",
-            "problemMatcher": []
-        },
-        {
-            "label": "chmodfolders",
-            "detail": "chmods folders to prevent perms issues",
-            "type": "shell",
-            "group": "none",
-            "command": "ssh deck@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S chmod -R ug+rw ${config:deckdir}/homebrew/'",
-            "problemMatcher": []
-        },
-        {
-            "label": "deployall",
-            "dependsOrder": "sequence",
-            "group": "none",
-            "dependsOn": [
-                "deploy",
-                "chmodfolders"
-            ],
+            "command": "ssh -t deck@${config:deckip} -p ${config:deckport} ${config:deckkey} 'systemctl --user restart plugin_loader 2>/dev/null || sudo systemctl restart plugin_loader'",
             "problemMatcher": []
         },
         // ALL-IN-ONE
@@ -98,8 +78,8 @@
             "group": "test",
             "dependsOn": [
                 "buildall",
-                "deployall"
-                // Uncomment this line if you'd like your python code reloaded after deployment (this will restart Steam)
+                "deploy"
+                // Uncomment this line to restart the loader after deployment
                 // ,"restartloader"
             ],
             "problemMatcher": []

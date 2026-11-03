@@ -66,12 +66,18 @@ const pendingDelete: Partial<Record<Kind, Promise<unknown>>> = {};
 async function loadGames(kind: Kind): Promise<Game[]> {
   await pendingDelete[kind]?.catch(() => undefined);
   const { entries } = await scan(kind);
-  const details = await Promise.all(entries.map(({ appid }) => getAppDetails(parseInt(appid))));
-  return entries.flatMap((entry, i) => {
+  // Steam never answers a details request for some IDs, such as 0, and each waits for the timeout.
+  // Every app that Steam names in the library has an overview, so ask only for those.
+  const known = entries.flatMap(entry => {
+    const overview = entry.bytes ? window.appStore.GetAppOverviewByAppID(parseInt(entry.appid)) : null;
+    return overview ? [{ entry, overview }] : [];
+  });
+  const details = await Promise.all(known.map(({ entry }) => getAppDetails(parseInt(entry.appid))));
+  return known.flatMap(({ entry, overview }, i) => {
     const info = details[i];
-    if (!info?.strDisplayName || !entry.bytes) return [];
+    if (!info?.strDisplayName) return [];
     // iInstallFolder is -1 both for shortcuts and for Steam games that are not installed.
-    const group: Group = window.appStore.GetAppOverviewByAppID(parseInt(entry.appid))?.BIsShortcut()
+    const group: Group = overview.BIsShortcut()
       ? "shortcut"
       : info.iInstallFolder === -1 ? "uninstalled" : "installed";
     return [{

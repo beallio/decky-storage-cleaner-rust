@@ -20,9 +20,9 @@ Node 24, pnpm 10.33 (`packageManager` in `package.json`), and rustup. `rust-tool
 
 ```sh
 pnpm install
-scripts/quality-gates   # fmt, clippy, tests, shim parity, typecheck, pnpm audit --prod, package
+scripts/quality-gates   # fmt, clippy, tests, version sync, shim parity, typecheck, pnpm audit --prod, package
 pnpm package            # only build out/decky-storage-cleaner-rust.zip
-pnpm watch             # rebuild dist/index.js on every change
+pnpm watch              # rebuild dist/index.js, with an inline source map, on every change
 ```
 
 ## Dependency security
@@ -42,7 +42,7 @@ The frontend never sends a path. The backend accepts only the two kinds and all-
 
 `scan` measures the app folders in parallel, one worker per core. It reads each folder through its own descriptor with `rustix` (`openat`, `statat`, and `RawDir`, which reads names into one buffer per folder) instead of `std::fs::DirEntry::metadata`: on musl, std looks up the full path again for every file, which made warm scans about 6 times slower on the VM. The backend has no `unsafe` code (`#![forbid(unsafe_code)]`). After a delete with no failures, the frontend removes the deleted entries without a new scan; after any failure it scans again, because a failed delete can leave part of a folder.
 
-The frontend groups entries with Steam's data: `appStore.GetAppOverviewByAppID(appid).BIsShortcut()` marks a non-Steam shortcut, and otherwise `iInstallFolder === -1` marks a Steam game that is not installed. `iInstallFolder` alone cannot separate the two, because Steam returns `-1` for both.
+The frontend shows only apps that Steam can name. It asks for app details only when `appStore.GetAppOverviewByAppID(appid)` returns an overview: Steam never answers a details request for some IDs, such as `0`, so each of those would hold the list for the full 1 s timeout. Every game, tool and non-Steam shortcut in the library has an overview. The frontend then groups entries: `BIsShortcut()` on the overview marks a non-Steam shortcut, and otherwise `iInstallFolder === -1` marks a Steam game that is not installed. `iInstallFolder` alone cannot separate the two, because Steam returns `-1` for both.
 
 ## Updating the SDK
 
@@ -53,4 +53,4 @@ To build against a local `decky-loader` checkout, uncomment the `[patch]` sectio
 
 ## Release
 
-Set `version` in `package.json` and `backend-rust/Cargo.toml`, then push a `vX.Y.Z` tag. The Release workflow runs the quality gates and attaches the ZIP and its SHA-256 to a GitHub Release.
+Set `version` in `package.json` and `backend-rust/Cargo.toml` (`scripts/quality-gates` fails if they differ), then push a `vX.Y.Z` tag. The Release workflow runs the quality gates and attaches the ZIP and its SHA-256 to a GitHub Release.
