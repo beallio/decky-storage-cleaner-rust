@@ -168,17 +168,24 @@ const CacheSection: FC<{ kind: Kind }> = ({ kind }) => {
           <div style={{ fontSize: "15px", fontWeight: "bold", marginBottom: "10px" }}>{label}</div>
         </PanelSectionRow>
         {list.map(game => (
-          <React.Fragment key={game.appid}>
-            <DialogCheckbox
-              label={`${game.name} (${formatBytes(game.bytes)})`}
-              onChange={checked => setSelected(ids => (checked ? [...ids, game.appid] : ids.filter(id => id !== game.appid)))}
-            />
-            {isCompat && game.is_not_steam_cloud_supported && (
-              <div style={{ fontSize: "12px", color: "red", margin: "0 0 12px 35px" }}>
-                WARNING: This game DOES NOT support or has never synced to Steam Cloud Saves. ON-DEVICE GAME SAVE DATA MAY BE PERMANENTLY LOST!
-              </div>
-            )}
-          </React.Fragment>
+          <PanelSectionRow key={game.appid}>
+            <Field highlightOnFocus focusable={false} bottomSeparator="none" childrenLayout="below">
+              <DialogCheckbox
+                style={{ marginBottom: 0 }}
+                label={`${game.name} (${formatBytes(game.bytes)})`}
+                // In the row, the warning is highlighted and scrolled into view with its game.
+                description={
+                  isCompat &&
+                  game.is_not_steam_cloud_supported && (
+                    <span style={{ fontSize: "12px", color: "red" }}>
+                      WARNING: This game DOES NOT support or has never synced to Steam Cloud Saves. ON-DEVICE GAME SAVE DATA MAY BE PERMANENTLY LOST!
+                    </span>
+                  )
+                }
+                onChange={checked => setSelected(ids => (checked ? [...ids, game.appid] : ids.filter(id => id !== game.appid)))}
+              />
+            </Field>
+          </PanelSectionRow>
         ))}
       </>
     );
