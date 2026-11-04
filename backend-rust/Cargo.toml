@@ -1,6 +1,6 @@
 [package]
 name = "storage-cleaner-backend"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.98"
 license = "GPL-3.0-or-later"
